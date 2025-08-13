@@ -37,15 +37,35 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     try {
         if (info.menuItemId === 'aiHelpSelection') {
             // User selected text, ask AI about the selection
-            await openPageWithText('https://chatgpt.com', info.selectionText);
+            await openAllSelectedServices(info.selectionText);
         } else if (info.menuItemId === 'aiHelpPage') {
             // No selection, ask AI to explain the page
-            await openPageWithText('https://chatgpt.com', `Please explain what this webpage is about: ${info.pageUrl || tab.url}`);
+            await openAllSelectedServices(`Please explain what this webpage is about: ${info.pageUrl || tab.url}`);
         }
     } catch (error) {
         console.error('Error handling context menu click:', error);
     }
 });
+
+// Function to open all selected AI services
+async function openAllSelectedServices(text) {
+    try {
+        // Get selected services from storage
+        const result = await chrome.storage.sync.get(['selectedServices']);
+        const selectedServices = result.selectedServices || ['https://chatgpt.com/'];
+        
+        console.log('Opening services:', selectedServices);
+        
+        // Open each selected service
+        for (const serviceUrl of selectedServices) {
+            await openPageWithText(serviceUrl, text);
+        }
+    } catch (error) {
+        console.error('Error opening selected services:', error);
+        // Fallback to ChatGPT only
+        await openPageWithText('https://chatgpt.com/', text);
+    }
+}
 
 
 // Function to open ChatGPT with text injection
@@ -92,7 +112,22 @@ async function openPageWithText(page, text) {
             // Wait for the tab to finish loading
             await waitForTabUpdate(tab.id);
         }
-        injectTextIntoTab(tab.id, text, isExistingTab);
+        
+        // Only inject text for ChatGPT (as it has the most robust implementation)
+        if (page.includes('chatgpt.com')) {
+            injectTextIntoTab(tab.id, text, isExistingTab);
+        } else {
+            // For other services, copy text to clipboard and show notification
+            try {
+                await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: copyToClipboardFallback,
+                    args: [text]
+                });
+            } catch (error) {
+                console.log('Could not copy to clipboard for', page);
+            }
+        }
 
     } catch (error) {
         console.error('Failed to open ${page}:', error);
@@ -227,5 +262,14 @@ function copyToClipboard(text) {
         alert('ChatGPT is ready! Your text has been copied to clipboard. Please paste it (Ctrl+V) into the input field.\n\nText: "' + text.substring(0, 100) + (text.length > 100 ? '...' : '') + '"');
     }).catch(() => {
         alert('Please manually type this text into ChatGPT:\n\n"' + text.substring(0, 200) + (text.length > 200 ? '...' : '') + '"');
+    });
+}
+
+// Fallback function for non-ChatGPT services
+function copyToClipboardFallback(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        alert('AI service is ready! Your text has been copied to clipboard. Please paste it (Ctrl+V) into the input field.\n\nText: "' + text.substring(0, 100) + (text.length > 100 ? '...' : '') + '"');
+    }).catch(() => {
+        alert('Please manually type this text:\n\n"' + text.substring(0, 200) + (text.length > 200 ? '...' : '') + '"');
     });
 }

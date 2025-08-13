@@ -18,7 +18,19 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://chatgpt.com/*"
+    "https://chatgpt.com/*",
+    "https://claude.ai/*",
+    "https://aistudio.google.com/*",
+    "https://grok.com/*",
+    "https://www.meta.ai/*",
+    "https://www.perplexity.ai/*",
+    "https://www.alphaxiv.org/*",
+    "https://app.usefindr.com/*",
+    "https://chat.deepseek.com/*",
+    "https://chat.qwen.ai/*",
+    "https://www.kimi.com/*",
+    "https://chat.z.ai/*",
+    "https://chat.mistral.ai/*"
   ],
   "action": {
     "default_title": "Open AI Help",
