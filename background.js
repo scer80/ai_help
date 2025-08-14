@@ -35,12 +35,17 @@ chrome.runtime.onInstalled.addListener(() => {
 // Handle context menu clicks
 chrome.contextMenus.onClicked.addListener(async (info, tab) => {
     try {
+        // Get saved prompts from storage
+        const result = await chrome.storage.sync.get(['selectionPrompt', 'pagePrompt']);
+        const selectionPrompt = result.selectionPrompt || 'What does this mean: ';
+        const pagePrompt = result.pagePrompt || 'Please explain what this webpage is about: ';
+        
         if (info.menuItemId === 'aiHelpSelection') {
             // User selected text, ask AI about the selection
-            await openAllSelectedServices(info.selectionText);
+            await openAllSelectedServices(selectionPrompt + info.selectionText);
         } else if (info.menuItemId === 'aiHelpPage') {
             // No selection, ask AI to explain the page
-            await openAllSelectedServices(`Please explain what this webpage is about: ${info.pageUrl || tab.url}`);
+            await openAllSelectedServices(pagePrompt + (info.pageUrl || tab.url));
         }
     } catch (error) {
         console.error('Error handling context menu click:', error);
