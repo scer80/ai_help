@@ -32,14 +32,8 @@ chrome.runtime.onInstalled.addListener(() => {
         });
         
         chrome.contextMenus.create({
-            id: "aiHelpPage",
-            title: "AI help",
-            contexts: ["page", "frame", "link", "image"]
-        });
-        
-        chrome.contextMenus.create({
             id: "aiSnipImage",
-            title: "Snip Image",
+            title: "AI Help Image Snip",
             contexts: ["page", "frame"]
         });
     } catch (error) {
@@ -58,9 +52,6 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
         if (info.menuItemId === 'aiHelpSelection') {
             // User selected text, ask AI about the selection
             await openAllSelectedServices(selectionPrompt + info.selectionText);
-        } else if (info.menuItemId === 'aiHelpPage') {
-            // No selection, ask AI to explain the page
-            await openAllSelectedServices(pagePrompt + (info.pageUrl || tab.url));
         } else if (info.menuItemId === 'aiSnipImage') {
             // User wants to snip an image
             await handleSnipImage(tab);
@@ -74,16 +65,60 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
 async function handleSnipImage(tab) {
     try {
         // Capture screenshot of visible tab
+        console.log('Capturing screenshot for snipping...');
         const screenshotDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
             format: 'png'
         });
+        console.log('Screenshot captured:', screenshotDataUrl);
         
         // Inject content script to show cropping interface
-        await chrome.scripting.executeScript({
-            target: { tabId: tab.id },
-            func: showImageCroppingInterface,
-            args: [screenshotDataUrl]
-        });
+        console.log('Attempting to inject content script into tab:', tab.id);
+        try {
+            // Try file-based injection first
+            const result = await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                files: ['scripts/crop-interface.js']
+            });
+            console.log('File injection result:', result);
+            
+            // Then call the function with screenshot data
+            await chrome.scripting.executeScript({
+                target: { tabId: tab.id },
+                func: (dataUrl) => {
+                    if (typeof showImageCroppingInterface === 'function') {
+                        showImageCroppingInterface(dataUrl);
+                    } else {
+                        alert('Cropping interface not available. Please try again.');
+                    }
+                },
+                args: [screenshotDataUrl]
+            });
+        } catch (injectionError) {
+            console.error('Failed to inject content script:', injectionError);
+            // Fallback to function injection
+            try {
+                const result = await chrome.scripting.executeScript({
+                    target: { tabId: tab.id },
+                    func: showImageCroppingInterface,
+                    args: [screenshotDataUrl]
+                });
+                console.log('Function injection fallback result:', result);
+            } catch (functionError) {
+                console.error('Function injection also failed:', functionError);
+                // Show a simple alert as final fallback
+                try {
+                    await chrome.scripting.executeScript({
+                        target: { tabId: tab.id },
+                        func: (errorMsg) => {
+                            alert('Snip Image failed: ' + errorMsg + '\n\nThis might happen on pages with strict security policies. Try on a different webpage.');
+                        },
+                        args: [injectionError.message]
+                    });
+                } catch (alertError) {
+                    console.error('Could not even show error alert:', alertError);
+                }
+            }
+        }
     } catch (error) {
         console.error('Error capturing screenshot:', error);
     }
@@ -341,206 +376,6 @@ function copyToClipboardFallback(text) {
         alert('AI service is ready! Your text has been copied to clipboard. Please paste it (Ctrl+V) into the input field.\n\nText: "' + text.substring(0, 100) + (text.length > 100 ? '...' : '') + '"');
     }).catch(() => {
         alert('Please manually type this text:\n\n"' + text.substring(0, 200) + (text.length > 200 ? '...' : '') + '"');
-    });
-}
-
-// Function to show image cropping interface (injected into page)
-function showImageCroppingInterface(screenshotDataUrl) {
-    // Remove any existing cropping interface
-    const existingOverlay = document.getElementById('ai-help-crop-overlay');
-    if (existingOverlay) {
-        existingOverlay.remove();
-    }
-
-    // Create overlay
-    const overlay = document.createElement('div');
-    overlay.id = 'ai-help-crop-overlay';
-    overlay.style.cssText = `
-        position: fixed;
-        top: 0;
-        left: 0;
-        width: 100vw;
-        height: 100vh;
-        background: rgba(0,0,0,0.8);
-        z-index: 999999;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-    `;
-
-    // Create screenshot image
-    const img = document.createElement('img');
-    img.src = screenshotDataUrl;
-    img.style.cssText = `
-        max-width: 90vw;
-        max-height: 70vh;
-        border: 2px solid #fff;
-        cursor: crosshair;
-    `;
-
-    // Create instructions
-    const instructions = document.createElement('div');
-    instructions.style.cssText = `
-        color: white;
-        font-size: 18px;
-        margin-bottom: 20px;
-        text-align: center;
-    `;
-    instructions.textContent = 'Click and drag to select area to snip';
-
-    // Create buttons
-    const buttonContainer = document.createElement('div');
-    buttonContainer.style.cssText = `
-        margin-top: 20px;
-        display: flex;
-        gap: 10px;
-    `;
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.textContent = 'Cancel';
-    cancelBtn.style.cssText = `
-        padding: 10px 20px;
-        background: #666;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-    `;
-
-    const useFullBtn = document.createElement('button');
-    useFullBtn.textContent = 'Use Full Screenshot';
-    useFullBtn.style.cssText = `
-        padding: 10px 20px;
-        background: #007cba;
-        color: white;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-    `;
-
-    // Selection variables
-    let isSelecting = false;
-    let startX, startY, endX, endY;
-    let selectionDiv;
-
-    // Mouse events for selection
-    img.addEventListener('mousedown', (e) => {
-        isSelecting = true;
-        const rect = img.getBoundingClientRect();
-        startX = e.clientX - rect.left;
-        startY = e.clientY - rect.top;
-        
-        // Create selection div
-        selectionDiv = document.createElement('div');
-        selectionDiv.style.cssText = `
-            position: absolute;
-            border: 2px dashed #00ff00;
-            background: rgba(0,255,0,0.1);
-            pointer-events: none;
-        `;
-        img.parentElement.style.position = 'relative';
-        img.parentElement.appendChild(selectionDiv);
-    });
-
-    img.addEventListener('mousemove', (e) => {
-        if (!isSelecting) return;
-        
-        const rect = img.getBoundingClientRect();
-        endX = e.clientX - rect.left;
-        endY = e.clientY - rect.top;
-        
-        const left = Math.min(startX, endX);
-        const top = Math.min(startY, endY);
-        const width = Math.abs(endX - startX);
-        const height = Math.abs(endY - startY);
-        
-        selectionDiv.style.left = left + 'px';
-        selectionDiv.style.top = top + 'px';
-        selectionDiv.style.width = width + 'px';
-        selectionDiv.style.height = height + 'px';
-    });
-
-    img.addEventListener('mouseup', (e) => {
-        if (!isSelecting) return;
-        isSelecting = false;
-        
-        // Create crop button if selection was made
-        if (Math.abs(endX - startX) > 10 && Math.abs(endY - startY) > 10) {
-            const cropBtn = document.createElement('button');
-            cropBtn.textContent = 'Send Selected Area';
-            cropBtn.style.cssText = `
-                padding: 10px 20px;
-                background: #28a745;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                cursor: pointer;
-            `;
-            cropBtn.addEventListener('click', () => {
-                cropAndSendImage(img, startX, startY, endX, endY, overlay);
-            });
-            buttonContainer.appendChild(cropBtn);
-        }
-    });
-
-    // Button events
-    cancelBtn.addEventListener('click', () => {
-        overlay.remove();
-    });
-
-    useFullBtn.addEventListener('click', () => {
-        sendImageToAI(screenshotDataUrl, 'What do you see in this image?');
-        overlay.remove();
-    });
-
-    // Assemble overlay
-    buttonContainer.appendChild(cancelBtn);
-    buttonContainer.appendChild(useFullBtn);
-    overlay.appendChild(instructions);
-    overlay.appendChild(img);
-    overlay.appendChild(buttonContainer);
-    document.body.appendChild(overlay);
-}
-
-// Function to crop and send selected image area
-function cropAndSendImage(img, startX, startY, endX, endY, overlay) {
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    // Calculate crop dimensions
-    const left = Math.min(startX, endX);
-    const top = Math.min(startY, endY);
-    const width = Math.abs(endX - startX);
-    const height = Math.abs(endY - startY);
-    
-    // Set canvas size to crop dimensions
-    canvas.width = width;
-    canvas.height = height;
-    
-    // Calculate scaling factors
-    const scaleX = img.naturalWidth / img.offsetWidth;
-    const scaleY = img.naturalHeight / img.offsetHeight;
-    
-    // Draw cropped image
-    ctx.drawImage(img, 
-        left * scaleX, top * scaleY, width * scaleX, height * scaleY,
-        0, 0, width, height
-    );
-    
-    // Convert to data URL and send
-    const croppedDataUrl = canvas.toDataURL('image/png');
-    sendImageToAI(croppedDataUrl, 'What do you see in this image?');
-    overlay.remove();
-}
-
-// Function to send image to AI services
-function sendImageToAI(imageDataUrl, prompt) {
-    // Send message to background script to open AI services with image
-    chrome.runtime.sendMessage({
-        action: 'openWithImage',
-        imageData: imageDataUrl,
-        prompt: prompt
     });
 }
 
